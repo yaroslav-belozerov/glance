@@ -1,46 +1,48 @@
-//! By convention, main.zig is where your main function lives in the case that
-//! you are building an executable. If you are making a library, the convention
-//! is to delete this file and start with root.zig instead.
+const out = std.io.getStdOut().writer();
+const err = std.io.getStdErr().writer();
+
+const loud = false;
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
-
-    try bw.flush(); // Don't forget to flush!
+    if (std.os.argv.len > 2) {
+        try err.print("Too many arguments. Usage: glance <file_path>\n", .{});
+    } else if (std.os.argv.len < 2) {
+        try err.print("Too few arguments. Usage: glance <file_path>\n", .{});
+    } else {
+        const path = std.mem.span(std.os.argv[1]);
+        find_gits(path) catch @panic("Failed to get path");
+    }
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+fn find_gits(path: []const u8) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(gpa.deinit() == .ok);
+    const allocator = gpa.allocator();
 
-test "use other module" {
-    try std.testing.expectEqual(@as(i32, 150), lib.add(100, 50));
-}
+    var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+    defer dir.close();
 
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
+    var walker = try dir.walk(allocator);
+    defer walker.deinit();
+
+    var entry = try walker.next();
+    var count: u8 = 0;
+    while (entry) |it| {
+        if (std.mem.eql(u8, it.basename, ".git")) {
+            count += 1;
+            try out.print("[{d}] Found .git repository at: {s}\r", .{ count, it.path });
         }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+        entry = walker.next() catch {
+            if (loud) {
+                try err.print("Failed to read directory {s}.\n", .{it.path});
+            }
+            continue;
+        };
+    }
+    try out.print("\n{d} git repositories found\n", .{count});
 }
 
 const std = @import("std");
-
-/// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
-const lib = @import("glance_lib");
+const ctime = @cImport({
+    @cInclude("time.h");
+});
