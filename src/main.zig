@@ -50,7 +50,15 @@ fn find_gits(path: []const u8) !void {
     try out.print("\n{d} git repositories found\n", .{count});
     for (1..year_length) |i| {
         const day: u16 = @intCast(i);
-        try out.print(" [{d} : {any}]", .{ day, contrib_graph.get(day) });
+        const value = contrib_graph.get(day);
+        if (value == null) {
+            try out.print(" ", .{});
+        } else {
+            try out.print("█", .{});
+        }
+        if (@rem(i, 31) == 0) {
+            try out.print("\n", .{});
+        }
     }
 }
 
@@ -67,7 +75,9 @@ fn get_git_data_for_repo(allocator: std.mem.Allocator, path: []const u8, contrib
     defer stderr_buffer.deinit(allocator);
     try child.spawn();
     child.collectOutput(allocator, &stdout_buffer, &stderr_buffer, 1024) catch {
-        try stderr.print("Failed to collect output \n", .{});
+        if (loud) {
+            try stderr.print("\nFailed to collect output", .{});
+        }
     };
     var lines = std.mem.splitSequence(u8, stdout_buffer.items, "\n");
     while (lines.next()) |ln| {
