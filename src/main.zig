@@ -3,6 +3,14 @@ const stderr = std.io.getStdErr().writer();
 
 const loud = false;
 
+const Github = struct {
+    const gray = prettyzig.RGB.init(21, 27, 35);
+    const low = prettyzig.RGB.init(3, 58, 22);
+    const medium = prettyzig.RGB.init(25, 108, 46);
+    const high = prettyzig.RGB.init(46, 160, 67);
+    const highest = prettyzig.RGB.init(86, 211, 100);
+};
+
 pub fn main() !void {
     if (std.os.argv.len > 2) {
         try stderr.print("Too many arguments. Usage: glance <file_path>\n", .{});
@@ -48,18 +56,55 @@ fn find_gits(path: []const u8) !void {
         };
     }
     try out.print("\n{d} git repositories found\n", .{count});
+    var max: u16 = 0;
+    var values = contrib_graph.valueIterator();
+    while (values.next()) |item| {
+        if (item.* > max) {
+            max = item.*;
+        }
+    }
+    try out.print("╔═══════════════════════════════╗\n║", .{});
     for (1..year_length) |i| {
         const day: u16 = @intCast(i);
         const value = contrib_graph.get(day);
         if (value == null) {
             try out.print(" ", .{});
         } else {
-            try out.print("█", .{});
+            const val: f64 = @floatFromInt(value.?);
+            const percent: u16 = @intFromFloat(val / @as(f64, @floatFromInt(max)) * 100.0);
+            const now = std.time.timestamp();
+            const nowgm = ctime.gmtime(&now);
+            const yday: u16 = @intCast(nowgm.*.tm_yday + 1);
+            var char: []const u8 = "█";
+            if (yday == day) {
+                char = "*";
+            }
+            switch (percent) {
+                0...24 => {
+                    try prettyzig.print(out, char, .{ .color = .{ .rgb = Github.low } });
+                },
+                25...49 => {
+                    try prettyzig.print(out, char, .{ .color = .{ .rgb = Github.medium } });
+                },
+                50...74 => {
+                    try prettyzig.print(out, char, .{ .color = .{ .rgb = Github.high } });
+                },
+                75...100 => {
+                    try prettyzig.print(out, char, .{ .color = .{ .rgb = Github.highest } });
+                },
+                else => {
+                    try out.print(" ", .{});
+                },
+            }
         }
         if (@rem(i, 31) == 0) {
-            try out.print("\n", .{});
+            try out.print("║\n║", .{});
         }
     }
+    for (0..32 - @rem(year_length, 31)) |_| {
+        try out.print(" ", .{});
+    }
+    try out.print("║\n╚═══════════════════════════════╝\n", .{});
 }
 
 fn get_git_data_for_repo(allocator: std.mem.Allocator, path: []const u8, contrib_graph: *std.AutoHashMap(u16, u16), year_string: []const u8) !void {
@@ -103,6 +148,7 @@ const std = @import("std");
 const ctime = @cImport({
     @cInclude("time.h");
 });
+const prettyzig = @import("prettyzig");
 
 fn getDayOfYear(year_str: []const u8, month_str: []const u8, day_str: []const u8) u16 {
     const year = std.fmt.parseInt(i32, year_str, 10) catch @panic("Could not parse year");
