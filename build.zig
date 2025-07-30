@@ -18,6 +18,9 @@ pub fn build(b: *std.Build) void {
     const clap = b.dependency("prettyzig", .{});
     exe.root_module.addImport("prettyzig", clap.module("prettyzig"));
 
+    const cliargs = b.addModule("cliargs", .{ .root_source_file = b.path("src/cliargs.zig") });
+    exe.root_module.addImport("cliargs", cliargs);
+
     b.installArtifact(exe);
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
