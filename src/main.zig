@@ -247,12 +247,38 @@ fn printClrInt(allocator: std.mem.Allocator, amount: u16, color: prettyzig.Color
 
 fn printDaily(conf: args.Config, year_length: u16, contrib_graph: *std.AutoHashMap(u16, u16), allocator: std.mem.Allocator) !void {
     var max: u16 = 0;
-    var values = contrib_graph.valueIterator();
+    var max_day: u16 = 0;
+    var min: u16 = std.math.maxInt(u16);
+    var min_day: u16 = 0;
+    var values = contrib_graph.iterator();
     while (values.next()) |item| {
-        if (item.* > max) {
-            max = item.*;
+        if (item.value_ptr.* > max) {
+            max = item.value_ptr.*;
+            max_day = item.key_ptr.*;
+        }
+        if (item.value_ptr.* < min and item.value_ptr.* > 0) {
+            min = item.value_ptr.*;
+            min_day = item.key_ptr.*;
         }
     }
+    const day_num = try std.fmt.allocPrint(allocator, "#{d}", .{max_day});
+    const day_contrib_num = try std.fmt.allocPrint(allocator, "{d}", .{max});
+    defer allocator.free(day_num);
+    defer allocator.free(day_contrib_num);
+    printClr("\nBest day ", .{ .ansi = .brightCyan });
+    printClr(day_num, .{ .rgb = Github.highest });
+    std.debug.print(" with ", .{});
+    printClr(day_contrib_num, .{ .rgb = Github.highest });
+    std.debug.print(" contributions\n", .{});
+    const min_day_num = try std.fmt.allocPrint(allocator, "#{d}", .{min_day});
+    const min_day_contrib_num = try std.fmt.allocPrint(allocator, "{d}", .{min});
+    defer allocator.free(min_day_num);
+    defer allocator.free(min_day_contrib_num);
+    printClr("Worst day ", .{ .ansi = .brightCyan });
+    printClr(min_day_num, .{ .rgb = Github.highest });
+    std.debug.print(" with ", .{});
+    printClr(min_day_contrib_num, .{ .rgb = Github.highest });
+    std.debug.print(" contributions\n", .{});
     printClr("\n╔", .{ .ansi = .brightCyan });
     for (0..paddedAmount(conf.padding, conf.line_len) / 2 - 4) |_| {
         printClr("═", .{ .ansi = .brightCyan });
@@ -322,10 +348,18 @@ fn printWeekly(conf: args.Config, _: u16, contrib_graph: *std.AutoHashMap(u16, u
         weeks[@intCast(@as(usize, item.key_ptr.* / 7))] += item.value_ptr.*;
     }
     var max: u16 = 0;
+    var max_week: u16 = 0;
+    var min: u16 = std.math.maxInt(u16);
+    var min_week: u16 = 0;
     for (0..52) |i| {
         const week: u16 = weeks[i];
         if (week > max) {
             max = week;
+            max_week = @intCast(i);
+        }
+        if (week < min and week > 0) {
+            min = week;
+            min_week = @intCast(i);
         }
     }
     const now = std.time.timestamp();
@@ -338,6 +372,24 @@ fn printWeekly(conf: args.Config, _: u16, contrib_graph: *std.AutoHashMap(u16, u
     if (conf.loud) {
         std.debug.print("\nToday is week {d} of year {d}\n", .{ yweek, conf.year });
     }
+    const week_num = try std.fmt.allocPrint(allocator, "#{d}", .{max_week});
+    const week_contrib_num = try std.fmt.allocPrint(allocator, "{d}", .{max});
+    defer allocator.free(week_num);
+    defer allocator.free(week_contrib_num);
+    printClr("\nBest week ", .{ .ansi = .brightCyan });
+    printClr(week_num, .{ .rgb = Github.highest });
+    std.debug.print(" with ", .{});
+    printClr(week_contrib_num, .{ .rgb = Github.highest });
+    std.debug.print(" contributions\n", .{});
+    const min_week_num = try std.fmt.allocPrint(allocator, "#{d}", .{min_week});
+    const min_week_contrib_num = try std.fmt.allocPrint(allocator, "{d}", .{min});
+    defer allocator.free(min_week_num);
+    defer allocator.free(min_week_contrib_num);
+    printClr("Worst week ", .{ .ansi = .brightCyan });
+    printClr(min_week_num, .{ .rgb = Github.highest });
+    std.debug.print(" with ", .{});
+    printClr(min_week_contrib_num, .{ .rgb = Github.highest });
+    std.debug.print(" contributions\n", .{});
     printClr("\n╔", .{ .ansi = .brightCyan });
     for (0..paddedAmount(conf.padding, conf.line_len) / 2 - 4) |_| {
         printClr("═", .{ .ansi = .brightCyan });

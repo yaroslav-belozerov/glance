@@ -59,6 +59,7 @@ pub fn parseArgs(arguments: [][*:0]u8) Config {
         config.author = author;
     }
 
+    var line_len_not_default = false;
     for (args[1..]) |argument| {
         const arg = std.mem.span(argument);
         switch (getArgType(arg)) {
@@ -104,6 +105,7 @@ pub fn parseArgs(arguments: [][*:0]u8) Config {
                     std.debug.print("Line length must not be more than 130 characters.\n", .{});
                     std.process.exit(1);
                 }
+                line_len_not_default = true;
                 config.line_len = line_len;
             },
             .help => {
@@ -117,6 +119,9 @@ pub fn parseArgs(arguments: [][*:0]u8) Config {
                 }
             },
         }
+    }
+    if (config.weekly and !line_len_not_default) {
+        config.line_len = 12;
     }
 
     return config;
