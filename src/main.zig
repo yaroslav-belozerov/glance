@@ -30,7 +30,9 @@ const Github = struct {
 
 pub fn main() !void {
     const conf = args.parseArgs(std.os.argv);
-    printClr(intro, .{ .ansi = .brightCyan });
+    if (!conf.no_intro) {
+        printClr(intro, .{ .ansi = .brightCyan });
+    }
     find_gits(conf) catch @panic("Failed to get path");
 }
 
@@ -40,7 +42,7 @@ fn find_gits(conf: args.Config) !void {
     const allocator = gpa.allocator();
 
     var year_length: u16 = 365;
-    if (isLeapYear(2025)) {
+    if (isLeapYear(conf.year)) {
         year_length += 1;
     }
     var contrib_graph = std.AutoHashMap(u16, u16).init(allocator);
@@ -74,7 +76,9 @@ fn find_gits(conf: args.Config) !void {
             printClrInt(allocator, count, .{ .ansi = .brightCyan });
             try out.print(" git repositories found", .{});
             var this_count: u16 = 0;
-            try get_git_data_for_repo(allocator, it.path, &contrib_graph, "2025", conf.author, &this_count, conf.loud);
+            const year_string = try std.fmt.allocPrint(allocator, "{d}", .{conf.year});
+            defer allocator.free(year_string);
+            try get_git_data_for_repo(allocator, it.path, &contrib_graph, year_string, conf.author, &this_count, conf.loud);
             const key = try allocator.dupe(u8, it.path);
             try contrib_counter.put(key, this_count);
         }
@@ -101,18 +105,14 @@ fn find_gits(conf: args.Config) !void {
     }.desc);
     var output_count: usize = 0;
     try out.print("\n", .{});
-    var max: u16 = 0;
     var total: u16 = 0;
     var values = contrib_graph.valueIterator();
     while (values.next()) |item| {
         total += item.*;
-        if (item.* > max) {
-            max = item.*;
-        }
     }
     try out.print("\n", .{});
     printClrInt(allocator, total, .{ .rgb = Github.highest });
-    try out.print(" total contributions by {s}", .{conf.author});
+    try out.print(" total contributions by {s} in {d}", .{ conf.author, conf.year });
     try out.print("\n", .{});
     for (arr.items) |it| {
         if (output_count >= conf.top) {
@@ -134,64 +134,11 @@ fn find_gits(conf: args.Config) !void {
             }
         }
     }
-    const line_len = 31;
-    printClr("\n╔", .{ .ansi = .brightCyan });
-    for (0..paddedAmount(conf.padding, line_len) / 2 - 4) |_| {
-        printClr("═", .{ .ansi = .brightCyan });
+    if (conf.weekly) {
+        try printWeekly(conf, year_length, &contrib_graph, allocator);
+    } else {
+        try printDaily(conf, year_length, &contrib_graph, allocator);
     }
-    printClr(" HEATMAP ", .{ .ansi = .brightCyan });
-    for (0..paddedAmount(conf.padding, line_len) / 2 - 4) |_| {
-        printClr("═", .{ .ansi = .brightCyan });
-    }
-    printClr("╗\n║", .{ .ansi = .brightCyan });
-    for (1..year_length) |i| {
-        const day: u16 = @intCast(i);
-        const value = contrib_graph.get(day);
-        const now = std.time.timestamp();
-        const nowgm = ctime.gmtime(&now);
-        const yday: u16 = @intCast(nowgm.*.tm_yday + 1);
-        const char: []const u8 = if (conf.padding > 0) "█" else "■";
-        const now_char: []const u8 = if (conf.padding > 0) "●" else "◆";
-        const empty_char: []const u8 = " ";
-        if (day == yday) {
-            printPadded(allocator, conf.padding, now_char, .{ .ansi = .red });
-            continue;
-        }
-        if (value == null) {
-            printPadded(allocator, conf.padding, empty_char, .{ .ansi = .brightRed });
-        } else {
-            const val: f64 = @floatFromInt(value.?);
-            const percent: u16 = @intFromFloat(val / @as(f64, @floatFromInt(max)) * 100.0);
-            switch (percent) {
-                0...24 => {
-                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.low });
-                },
-                25...49 => {
-                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.medium });
-                },
-                50...74 => {
-                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.high });
-                },
-                75...100 => {
-                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.highest });
-                },
-                else => {
-                    printPadded(allocator, conf.padding, empty_char, .{ .rgb = Github.low });
-                },
-            }
-        }
-        if (@rem(i, 31) == 0) {
-            printClr("║\n║", .{ .ansi = .brightCyan });
-        }
-    }
-    for (0..paddedAmount(conf.padding, line_len) - paddedAmount(conf.padding, @rem(year_length, 31)) + paddedAmount(conf.padding, 1)) |_| {
-        printClr(" ", .{ .ansi = .brightCyan });
-    }
-    printClr("║\n╚", .{ .ansi = .brightCyan });
-    for (0..paddedAmount(conf.padding, line_len)) |_| {
-        printClr("═", .{ .ansi = .brightCyan });
-    }
-    printClr("╝\n", .{ .ansi = .brightCyan });
 }
 
 fn get_git_data_for_repo(allocator: std.mem.Allocator, path: []const u8, contrib_graph: *std.AutoHashMap(u16, u16), year_string: []const u8, author: []const u8, contrib_counter: *u16, loud: bool) !void {
@@ -296,4 +243,152 @@ fn printClrInt(allocator: std.mem.Allocator, amount: u16, color: prettyzig.Color
     const amount_str = std.fmt.allocPrint(allocator, "{d}", .{amount}) catch return;
     defer allocator.free(amount_str);
     printClr(amount_str, color);
+}
+
+fn printDaily(conf: args.Config, year_length: u16, contrib_graph: *std.AutoHashMap(u16, u16), allocator: std.mem.Allocator) !void {
+    var max: u16 = 0;
+    var values = contrib_graph.valueIterator();
+    while (values.next()) |item| {
+        if (item.* > max) {
+            max = item.*;
+        }
+    }
+    printClr("\n╔", .{ .ansi = .brightCyan });
+    for (0..paddedAmount(conf.padding, conf.line_len) / 2 - 4) |_| {
+        printClr("═", .{ .ansi = .brightCyan });
+    }
+    printClr(" HEATMAP ", .{ .ansi = .brightCyan });
+    for (0..paddedAmount(conf.padding, conf.line_len) / 2 - 5 + @rem(conf.line_len, 2)) |_| {
+        printClr("═", .{ .ansi = .brightCyan });
+    }
+    printClr("╗\n║", .{ .ansi = .brightCyan });
+    const now = std.time.timestamp();
+    const nowgm = ctime.gmtime(&now);
+    var yday: u16 = @intCast(nowgm.*.tm_yday + 1);
+    if (nowgm.*.tm_year + 1900 != conf.year) {
+        yday = 999;
+    }
+    for (1..year_length) |i| {
+        const day: u16 = @intCast(i);
+        const value = contrib_graph.get(day);
+        const char: []const u8 = if (conf.padding > 0) "█" else "■";
+        const now_char: []const u8 = if (conf.padding > 0) "●" else "◆";
+        const empty_char: []const u8 = " ";
+        if (day == yday) {
+            printPadded(allocator, conf.padding, now_char, .{ .ansi = .red });
+            continue;
+        }
+        if (value == null) {
+            printPadded(allocator, conf.padding, empty_char, .{ .ansi = .brightRed });
+        } else {
+            const val: f64 = @floatFromInt(value.?);
+            const percent: u16 = @intFromFloat(val / @as(f64, @floatFromInt(max)) * 100.0);
+            switch (percent) {
+                0...24 => {
+                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.low });
+                },
+                25...49 => {
+                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.medium });
+                },
+                50...74 => {
+                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.high });
+                },
+                75...100 => {
+                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.highest });
+                },
+                else => {
+                    printPadded(allocator, conf.padding, empty_char, .{ .rgb = Github.low });
+                },
+            }
+        }
+        if (@rem(i, conf.line_len) == 0) {
+            printClr("║\n║", .{ .ansi = .brightCyan });
+        }
+    }
+    for (0..paddedAmount(conf.padding, conf.line_len) - paddedAmount(conf.padding, @rem(year_length, conf.line_len)) + paddedAmount(conf.padding, 1)) |_| {
+        printClr(" ", .{ .ansi = .brightCyan });
+    }
+    printClr("║\n╚", .{ .ansi = .brightCyan });
+    for (0..paddedAmount(conf.padding, conf.line_len)) |_| {
+        printClr("═", .{ .ansi = .brightCyan });
+    }
+    printClr("╝\n", .{ .ansi = .brightCyan });
+}
+
+fn printWeekly(conf: args.Config, _: u16, contrib_graph: *std.AutoHashMap(u16, u16), allocator: std.mem.Allocator) !void {
+    var weeks = [_]u16{0} ** 53;
+    var values = contrib_graph.iterator();
+    while (values.next()) |item| {
+        weeks[@intCast(@as(usize, item.key_ptr.* / 7))] += item.value_ptr.*;
+    }
+    var max: u16 = 0;
+    for (0..52) |i| {
+        const week: u16 = weeks[i];
+        if (week > max) {
+            max = week;
+        }
+    }
+    const now = std.time.timestamp();
+    const nowgm = ctime.gmtime(&now);
+    const yday: f64 = @floatFromInt(nowgm.*.tm_yday);
+    var yweek: u16 = @intFromFloat(@ceil(yday / 7.0));
+    if (nowgm.*.tm_year + 1900 != conf.year) {
+        yweek = 999;
+    }
+    if (conf.loud) {
+        std.debug.print("\nToday is week {d} of year {d}\n", .{ yweek, conf.year });
+    }
+    printClr("\n╔", .{ .ansi = .brightCyan });
+    for (0..paddedAmount(conf.padding, conf.line_len) / 2 - 4) |_| {
+        printClr("═", .{ .ansi = .brightCyan });
+    }
+    printClr(" HEATMAP ", .{ .ansi = .brightCyan });
+    for (0..paddedAmount(conf.padding, conf.line_len) / 2 - 5 + @rem(conf.line_len, 2)) |_| {
+        printClr("═", .{ .ansi = .brightCyan });
+    }
+    printClr("╗\n║", .{ .ansi = .brightCyan });
+    for (0..52) |i| {
+        if (i != 0 and @rem(i, conf.line_len) == 0) {
+            printClr("║\n║", .{ .ansi = .brightCyan });
+        }
+        const week: u16 = weeks[i];
+        const char: []const u8 = if (conf.padding > 0) "█" else "■";
+        const now_char: []const u8 = if (conf.padding > 0) "●" else "◆";
+        const empty_char: []const u8 = " ";
+        if (i == yweek) {
+            printPadded(allocator, conf.padding, now_char, .{ .ansi = .red });
+            continue;
+        }
+        if (week == 0) {
+            printPadded(allocator, conf.padding, empty_char, .{ .ansi = .brightRed });
+        } else {
+            const val: f64 = @floatFromInt(week);
+            const percent: u16 = @intFromFloat(val / @as(f64, @floatFromInt(max)) * 100.0);
+            switch (percent) {
+                0...24 => {
+                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.low });
+                },
+                25...49 => {
+                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.medium });
+                },
+                50...74 => {
+                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.high });
+                },
+                75...100 => {
+                    printPadded(allocator, conf.padding, char, .{ .rgb = Github.highest });
+                },
+                else => {
+                    printPadded(allocator, conf.padding, empty_char, .{ .rgb = Github.low });
+                },
+            }
+        }
+    }
+    for (0..paddedAmount(conf.padding, conf.line_len) - paddedAmount(conf.padding, @rem(52, conf.line_len))) |_| {
+        printClr(" ", .{ .ansi = .brightCyan });
+    }
+    printClr("║\n╚", .{ .ansi = .brightCyan });
+    for (0..paddedAmount(conf.padding, conf.line_len)) |_| {
+        printClr("═", .{ .ansi = .brightCyan });
+    }
+    printClr("╝\n", .{ .ansi = .brightCyan });
 }
