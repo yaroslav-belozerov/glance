@@ -49,17 +49,24 @@ pub fn parseArgs(arguments: [][*:0]u8) Config {
     const now = std.time.timestamp();
     const nowgm = ctime.gmtime(&now);
     var config = Config{ .author = "", .path = ".", .padding = 0, .loud = false, .top = 3, .year = @intCast(nowgm.*.tm_year + 1900), .weekly = false, .line_len = 31, .no_intro = false };
-    const args = arguments[1..];
 
-    if (args.len == 0) {
-        printUsage();
-        std.process.exit(1);
+    if (arguments.len == 1) {
+        config.author = "";
     } else {
-        const author: []const u8 = std.mem.span(args[0]);
+        const author: []const u8 = std.mem.span(arguments[1]);
+        if (std.mem.eql(u8, author, "--help")) {
+            printUsage();
+            std.process.exit(0);
+        }
         config.author = author;
     }
 
+    const args = arguments[1..];
+
     var line_len_not_default = false;
+    if (args.len == 0) {
+        return config;
+    }
     for (args[1..]) |argument| {
         const arg = std.mem.span(argument);
         switch (getArgType(arg)) {

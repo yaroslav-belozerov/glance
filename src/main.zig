@@ -112,7 +112,15 @@ fn find_gits(conf: args.Config) !void {
     }
     try out.print("\n", .{});
     printClrInt(allocator, total, .{ .rgb = Github.highest });
-    try out.print(" total contributions by {s} in {d}", .{ conf.author, conf.year });
+    if (std.mem.eql(u8, conf.author, "")) {
+        try out.print(" total contributions by everyone in {d}", .{conf.year});
+    } else {
+        try out.print(" total contributions by {s} in {d}", .{ conf.author, conf.year });
+    }
+    if (total == 0) {
+        try out.print("\n", .{});
+        return;
+    }
     try out.print("\n", .{});
     for (arr.items) |it| {
         if (output_count >= conf.top) {
@@ -142,18 +150,23 @@ fn find_gits(conf: args.Config) !void {
 }
 
 fn get_git_data_for_repo(allocator: std.mem.Allocator, path: []const u8, contrib_graph: *std.AutoHashMap(u16, u16), year_string: []const u8, author: []const u8, contrib_counter: *u16, loud: bool) !void {
-    const argv = [_][]const u8{ "git", "-C", path, "log", "--oneline", "--all", "--no-patch", "--format=%ci", "--author", author };
-    var child = std.process.Child.init(&argv, allocator);
+    var argv = [_][]const u8{ "git", "-C", path, "log", "--oneline", "--all", "--no-patch", "--format=%ci" };
+    var child: ?std.process.Child = null;
+    if (!std.mem.eql(u8, author, "")) {
+        child = std.process.Child.init(&(argv ++ [_][]const u8{ "--author", author }), allocator);
+    } else {
+        child = std.process.Child.init(&argv, allocator);
+    }
 
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
+    child.?.stdout_behavior = .Pipe;
+    child.?.stderr_behavior = .Pipe;
 
     var stdout_buffer: std.ArrayListUnmanaged(u8) = .empty;
     defer stdout_buffer.deinit(allocator);
     var stderr_buffer: std.ArrayListUnmanaged(u8) = .empty;
     defer stderr_buffer.deinit(allocator);
-    try child.spawn();
-    child.collectOutput(allocator, &stdout_buffer, &stderr_buffer, 1024) catch {
+    try child.?.spawn();
+    child.?.collectOutput(allocator, &stdout_buffer, &stderr_buffer, 1024) catch {
         if (loud) {
             try stderr.print("\nFailed to collect output", .{});
         }
@@ -247,38 +260,48 @@ fn printClrInt(allocator: std.mem.Allocator, amount: u16, color: prettyzig.Color
 
 fn printDaily(conf: args.Config, year_length: u16, contrib_graph: *std.AutoHashMap(u16, u16), allocator: std.mem.Allocator) !void {
     var max: u16 = 0;
+    var max_changed = false;
     var max_day: u16 = 0;
     var min: u16 = std.math.maxInt(u16);
-    var min_day: u16 = 0;
+    var min_changed = false;
+    var min_day: u16 = std.math.maxInt(u16);
     var values = contrib_graph.iterator();
     while (values.next()) |item| {
         if (item.value_ptr.* > max) {
             max = item.value_ptr.*;
             max_day = item.key_ptr.*;
+            max_changed = true;
         }
         if (item.value_ptr.* < min and item.value_ptr.* > 0) {
             min = item.value_ptr.*;
             min_day = item.key_ptr.*;
+            min_changed = true;
         }
     }
-    const day_num = try std.fmt.allocPrint(allocator, "#{d}", .{max_day});
-    const day_contrib_num = try std.fmt.allocPrint(allocator, "{d}", .{max});
-    defer allocator.free(day_num);
-    defer allocator.free(day_contrib_num);
-    printClr("\nBest day ", .{ .ansi = .brightCyan });
-    printClr(day_num, .{ .rgb = Github.highest });
-    std.debug.print(" with ", .{});
-    printClr(day_contrib_num, .{ .rgb = Github.highest });
-    std.debug.print(" contributions\n", .{});
-    const min_day_num = try std.fmt.allocPrint(allocator, "#{d}", .{min_day});
-    const min_day_contrib_num = try std.fmt.allocPrint(allocator, "{d}", .{min});
-    defer allocator.free(min_day_num);
-    defer allocator.free(min_day_contrib_num);
-    printClr("Worst day ", .{ .ansi = .brightCyan });
-    printClr(min_day_num, .{ .rgb = Github.highest });
-    std.debug.print(" with ", .{});
-    printClr(min_day_contrib_num, .{ .rgb = Github.highest });
-    std.debug.print(" contributions\n", .{});
+    std.debug.print("\n", .{});
+    if (max_changed) {
+        const day_num = try std.fmt.allocPrint(allocator, "#{d}", .{max_day});
+        const day_contrib_num = try std.fmt.allocPrint(allocator, "{d}", .{max});
+        defer allocator.free(day_num);
+        defer allocator.free(day_contrib_num);
+        printClr("Best day ", .{ .ansi = .brightCyan });
+        printClr(day_num, .{ .rgb = Github.highest });
+        std.debug.print(" with ", .{});
+        printClr(day_contrib_num, .{ .rgb = Github.highest });
+        std.debug.print(" contributions\n", .{});
+    }
+    if (min_changed) {
+        const min_day_num = try std.fmt.allocPrint(allocator, "#{d}", .{min_day});
+        const min_day_contrib_num = try std.fmt.allocPrint(allocator, "{d}", .{min});
+        defer allocator.free(min_day_num);
+        defer allocator.free(min_day_contrib_num);
+        printClr("Worst day ", .{ .ansi = .brightCyan });
+        printClr(min_day_num, .{ .rgb = Github.highest });
+        std.debug.print(" with ", .{});
+        printClr(min_day_contrib_num, .{ .rgb = Github.highest });
+        std.debug.print(" contributions", .{});
+        std.debug.print("\n", .{});
+    }
     printClr("\n╔", .{ .ansi = .brightCyan });
     for (0..paddedAmount(conf.padding, conf.line_len) / 2 - 4) |_| {
         printClr("═", .{ .ansi = .brightCyan });
