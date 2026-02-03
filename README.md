@@ -1,3 +1,6 @@
+> [!WARNING]
+> moved to [forgejo](https://fj.tarakoshka.tech/tarakoshka/glance)
+---
 <img width="1182" height="275" style="width: 100%;" alt="glance_banner_nobg" src="https://github.com/user-attachments/assets/3cfae363-4b65-4b0e-8794-b8c33251e5f3" />
 
 # glance
